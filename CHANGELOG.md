@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.2.0] - 2026-11-26
+
+### Added
+- **Docker Compose One-Command Stack**: Added `docker-compose.yml`, multi-stage production `Dockerfile`, `.dockerignore`, and `docker/init.sql` to launch PostgreSQL 16 + Stock Light on port `3090` with `docker compose up -d`.
+- **Local PostgreSQL Backend Mode**: Added `src/lib/db.ts` (`pg`) and REST API routes (`/api/zones`, `/api/items`, `/api/items/[id]`) so the app automatically persists to the Docker PostgreSQL database when `DATABASE_URL` is provided.
+- **Persistent Docker Photo Volume**: Updated `/api/upload` and added `/api/uploads/[filename]` to store and serve uploaded item/spot photos on a persistent Docker volume when Cloudflare R2 credentials are not set.
+
+---
+
 ## [0.1.1] - 2026-11-25
 
 ### Added

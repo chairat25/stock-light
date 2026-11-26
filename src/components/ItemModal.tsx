@@ -122,10 +122,15 @@ export function ItemModal({
         throw new Error(data.error || 'อัปโหลดรูปไม่สำเร็จ');
       }
 
-      const finalUrl = data.mode === 'cloudflare-r2' && data.url ? data.url : dataUrl;
+      const finalUrl =
+        (data.mode === 'cloudflare-r2' || data.mode === 'local-disk') && data.url
+          ? data.url
+          : dataUrl;
 
       if (data.mode === 'cloudflare-r2') {
         setUploadHint('อัปโหลดภาพขึ้น Cloudflare R2 เรียบร้อยแล้ว');
+      } else if (data.mode === 'local-disk') {
+        setUploadHint('บันทึกภาพลง Docker Volume เรียบร้อยแล้ว');
       } else {
         setUploadHint('บันทึกรูปภาพในโหมดทดลอง (ตั้งค่า Cloudflare R2 ใน .env.local เพื่อเก็บบนคลาวด์)');
       }

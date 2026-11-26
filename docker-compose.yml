@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: stock-light-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stocklight}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stocklight_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-stocklight}
+    ports:
+      - "${POSTGRES_PORT:-5439}:5432"
+    volumes:
+      - stock_light_pgdata:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stocklight} -d ${POSTGRES_DB:-stocklight}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-light-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-3090}:3090"
+    environment:
+      NODE_ENV: production
+      PORT: 3090
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stocklight}:${POSTGRES_PASSWORD:-stocklight_dev}@db:5432/${POSTGRES_DB:-stocklight}
+      LOCAL_UPLOAD_DIR: /app/uploads
+      # Optional: Supabase Auth SSO & DB (leave empty to use local Docker PostgreSQL)
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+      NEXT_PUBLIC_SSO_DOMAIN: ${NEXT_PUBLIC_SSO_DOMAIN:-}
+      # Optional: Cloudflare R2 (leave empty to persist uploaded photos in Docker volume)
+      CLOUDFLARE_R2_ACCOUNT_ID: ${CLOUDFLARE_R2_ACCOUNT_ID:-}
+      CLOUDFLARE_R2_ACCESS_KEY_ID: ${CLOUDFLARE_R2_ACCESS_KEY_ID:-}
+      CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${CLOUDFLARE_R2_SECRET_ACCESS_KEY:-}
+      CLOUDFLARE_R2_BUCKET_NAME: ${CLOUDFLARE_R2_BUCKET_NAME:-}
+      CLOUDFLARE_R2_PUBLIC_URL: ${CLOUDFLARE_R2_PUBLIC_URL:-}
+    volumes:
+      - stock_light_uploads:/app/uploads
+
+volumes:
+  stock_light_pgdata:
+  stock_light_uploads:

@@ -38,7 +38,7 @@ interface InventoryAppProps {
   user: AuthUser;
   initialZones: Zone[];
   initialItems: InventoryItem[];
-  supabaseReady: boolean;
+  storageMode: 'supabase' | 'postgres' | 'demo';
 }
 
 type ExpiryFilter = 'all' | 'expiring_soon' | 'expired' | 'has_expiry' | 'no_expiry';
@@ -47,14 +47,14 @@ export function InventoryApp({
   user,
   initialZones,
   initialItems,
-  supabaseReady,
+  storageMode,
 }: InventoryAppProps) {
   const router = useRouter();
   const [zones, setZones] = useState<Zone[]>(initialZones);
   const [items, setItems] = useState<InventoryItem[]>(initialItems);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [customUnits, setCustomUnits] = useState<string[]>([]);
-  const [hydratedDemo, setHydratedDemo] = useState(!user.isDemo);
+  const [hydratedDemo, setHydratedDemo] = useState(storageMode !== 'demo');
 
   const [search, setSearch] = useState('');
   const [selectedZoneId, setSelectedZoneId] = useState<string>('all');
@@ -197,7 +197,7 @@ export function InventoryApp({
   async function handleSaveItem(input: ItemFormInput, existingId?: string) {
     const now = new Date().toISOString();
 
-    if (user.isDemo) {
+    if (storageMode === 'demo') {
       if (existingId) {
         setItems((prev) =>
           prev.map((it) =>
@@ -212,6 +212,29 @@ export function InventoryApp({
           updated_at: now,
         };
         setItems((prev) => [newItem, ...prev]);
+      }
+      return;
+    }
+
+    if (storageMode === 'postgres') {
+      if (existingId) {
+        const res = await fetch(`/api/items/${existingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        });
+        if (!res.ok) throw new Error('ไม่สามารถอัปเดตรายการในฐานข้อมูลได้');
+        const updated: InventoryItem = await res.json();
+        setItems((prev) => prev.map((it) => (it.id === existingId ? updated : it)));
+      } else {
+        const res = await fetch('/api/items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        });
+        if (!res.ok) throw new Error('ไม่สามารถบันทึกรายการลงฐานข้อมูลได้');
+        const created: InventoryItem = await res.json();
+        setItems((prev) => [created, ...prev]);
       }
       return;
     }
@@ -251,7 +274,16 @@ export function InventoryApp({
       )
     );
 
-    if (!user.isDemo) {
+    if (storageMode === 'postgres') {
+      await fetch(`/api/items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity: nextQty }),
+      });
+      return;
+    }
+
+    if (storageMode === 'supabase') {
       const supabase = createSupabaseBrowserClient();
       if (supabase) {
         await supabase.from('items').update({ quantity: nextQty }).eq('id', item.id);
@@ -263,7 +295,12 @@ export function InventoryApp({
     setItems((prev) => prev.filter((it) => it.id !== item.id));
     setSelectedItemId(null);
 
-    if (!user.isDemo) {
+    if (storageMode === 'postgres') {
+      await fetch(`/api/items/${item.id}`, { method: 'DELETE' });
+      return;
+    }
+
+    if (storageMode === 'supabase') {
       const supabase = createSupabaseBrowserClient();
       if (supabase) {
         await supabase.from('items').delete().eq('id', item.id);
@@ -272,7 +309,7 @@ export function InventoryApp({
   }
 
   async function handleCreateZone(name: string, description: string): Promise<Zone | null> {
-    if (user.isDemo) {
+    if (storageMode === 'demo') {
       const newZone: Zone = {
         id: `zone-${Date.now()}`,
         name,
@@ -281,6 +318,22 @@ export function InventoryApp({
       };
       setZones((prev) => [...prev, newZone]);
       return newZone;
+    }
+
+    if (storageMode === 'postgres') {
+      const res = await fetch('/api/zones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description,
+          sort_order: zones.length + 1,
+        }),
+      });
+      if (!res.ok) return null;
+      const created: Zone = await res.json();
+      setZones((prev) => [...prev, created]);
+      return created;
     }
 
     const supabase = createSupabaseBrowserClient();
@@ -373,12 +426,7 @@ export function InventoryApp({
               <span>{user.isDemo ? 'โหมดทดลอง' : user.name}</span>
             </div>
 
-            {user.isDemo ? (
-              <Link href="/login" className="btn btn-secondary" style={{ padding: '0.45rem 0.8rem' }}>
-                <LogIn size={15} />
-                เข้าสู่ระบบ SSO
-              </Link>
-            ) : (
+            {storageMode === 'supabase' ? (
               <button
                 type="button"
                 className="btn btn-ghost btn-icon"
@@ -388,6 +436,11 @@ export function InventoryApp({
               >
                 <LogOut size={16} />
               </button>
+            ) : (
+              <Link href="/login" className="btn btn-secondary" style={{ padding: '0.45rem 0.8rem' }}>
+                <LogIn size={15} />
+                เข้าสู่ระบบ SSO
+              </Link>
             )}
           </div>
         </div>
@@ -395,11 +448,11 @@ export function InventoryApp({
 
       {/* Main Content */}
       <main className="main-container">
-        {user.isDemo && (
+        {storageMode === 'demo' && (
           <div className="notice-bar">
             <span>
               กำลังใช้งานใน <strong>Demo Mode</strong> — เพิ่ม แก้ไข นับจำนวน และอัปโหลดรูปทดสอบได้ทันที
-              {!supabaseReady && ' (เชื่อมต่อ Supabase SSO และ Cloudflare R2 ได้ในไฟล์ .env.local)'}
+              {' (เชื่อมต่อ Supabase SSO / PostgreSQL และ Cloudflare R2 ได้ในไฟล์ .env.local)'}
             </span>
             <Link href="/login" style={{ color: 'var(--accent)', fontWeight: 500 }}>
               ดูหน้า Login SSO →

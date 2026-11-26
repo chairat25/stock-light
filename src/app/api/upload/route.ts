@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { mkdir, writeFile } from 'fs/promises';
+import path from 'path';
 import { isR2Configured, uploadToR2 } from '@/lib/r2';
 import { createSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
 
@@ -15,7 +17,7 @@ const ALLOWED_MIME_TYPES = new Set([
 export async function POST(request: Request) {
   try {
     // 1. If Supabase is configured, require an authenticated user
-    let userFolder = 'demo';
+    let userFolder = 'local';
     if (isSupabaseServerConfigured()) {
       const supabase = await createSupabaseServerClient();
       const {
@@ -31,8 +33,11 @@ export async function POST(request: Request) {
       userFolder = user.id;
     }
 
-    // 2. If Cloudflare R2 is not configured yet, inform client to use local preview fallback
-    if (!isR2Configured()) {
+    const r2Ready = isR2Configured();
+    const localUploadDir = process.env.LOCAL_UPLOAD_DIR;
+
+    // 2. If neither R2 nor local Docker volume upload is configured, use client demo fallback
+    if (!r2Ready && !localUploadDir) {
       return NextResponse.json({
         mode: 'local-fallback',
         message: 'Cloudflare R2 ยังไม่ได้ตั้งค่า ระบบจะเก็บรูปในโหมดทดลองชั่วคราว',
@@ -64,26 +69,37 @@ export async function POST(request: Request) {
     const ext = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
     const randomId = crypto.randomBytes(8).toString('hex');
     const datePrefix = new Date().toISOString().slice(0, 10);
-    const key = `stock-light/${userFolder}/${datePrefix}/${kind}-${randomId}.${ext}`;
-
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const url = await uploadToR2({
-      key,
-      body: buffer,
-      contentType: file.type,
-    });
+    if (r2Ready) {
+      const key = `stock-light/${userFolder}/${datePrefix}/${kind}-${randomId}.${ext}`;
+      const url = await uploadToR2({
+        key,
+        body: buffer,
+        contentType: file.type,
+      });
+
+      return NextResponse.json({
+        mode: 'cloudflare-r2',
+        url,
+        key,
+      });
+    }
+
+    // Persist to Docker volume / local disk directory
+    const filename = `${datePrefix}-${kind}-${randomId}.${ext}`;
+    await mkdir(localUploadDir!, { recursive: true });
+    await writeFile(path.join(localUploadDir!, filename), buffer);
 
     return NextResponse.json({
-      mode: 'cloudflare-r2',
-      url,
-      key,
+      mode: 'local-disk',
+      url: `/api/uploads/${filename}`,
     });
   } catch (err) {
-    console.error('[R2 Upload Error]', err);
+    console.error('[Upload Error]', err);
     return NextResponse.json(
-      { error: 'ไม่สามารถอัปโหลดรูปภาพไปยัง Cloudflare R2 ได้' },
+      { error: 'ไม่สามารถอัปโหลดรูปภาพได้' },
       { status: 500 }
     );
   }
